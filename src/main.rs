@@ -1,23 +1,5 @@
-struct NonEmptyString {
-    first: char,
-    rest: String,
-}
-macro_rules! non_empty_string_push {
-    ($string: ident, $c: expr) => {
-        match &mut $string {
-            None => {
-                $string = Some(NonEmptyString {
-                    first: $c,
-                    rest: String::new(),
-                })
-            }
-            Some(string) => string.rest.push($c),
-        }
-    };
-}
-
 enum UndNodeKind {
-    Text(NonEmptyString),
+    Text(String),
     Group(Vec<UndNode>),
 }
 struct UndNode {
@@ -38,7 +20,7 @@ macro_rules! und_get_top {
         }
     };
 }
-pub fn parse_und(input: &str) -> UndParsingResult {
+fn parse_und(input: &str) -> UndParsingResult {
     let mut root = Vec::new();
     struct Overlay {
         idx: usize,
@@ -52,7 +34,7 @@ pub fn parse_und(input: &str) -> UndParsingResult {
     let mut idx = 0;
     let mut curidx = idx;
 
-    let mut sbuf = None;
+    let mut sbuf = String::new();
     let mut sbufidx = idx;
 
     let mut escaped = false;
@@ -65,23 +47,23 @@ pub fn parse_und(input: &str) -> UndParsingResult {
             if escaped {
                 escaped = false;
                 if !(c == '(' || c == ')' || c == '\\') {
-                    non_empty_string_push!(sbuf, '\\');
+                    sbuf.push('\\');
                 }
-                non_empty_string_push!(sbuf, c);
+                sbuf.push(c);
                 continue;
             }
         }
 
         match c {
             Some(')') | None | Some('(') => {
-                if let Some(filled_sbuf) = sbuf {
+                if sbuf != "" {
                     let top = und_get_top!(overlays, root);
                     top.push(UndNode {
                         idx: sbufidx,
-                        kind: UndNodeKind::Text(filled_sbuf),
+                        kind: UndNodeKind::Text(sbuf),
                     });
                     sbufidx = idx;
-                    sbuf = None;
+                    sbuf = String::new();
                 }
                 if c == Some(')') || c == None {
                     match overlays.pop() {
@@ -111,7 +93,7 @@ pub fn parse_und(input: &str) -> UndParsingResult {
                 }
             }
             Some('\\') => escaped = true,
-            Some(c) => non_empty_string_push!(sbuf, c),
+            Some(c) => sbuf.push(c),
         }
     }
 
@@ -123,56 +105,34 @@ pub fn parse_und(input: &str) -> UndParsingResult {
     }
 }
 
-struct NonEmptyVec<T> {
-    first: T,
-    rest: Vec<T>,
-}
-macro_rules! non_empty_vec_push {
-    ($vec: ident, $item: expr) => {
-        match &mut $vec {
-            None => {
-                $vec = Some(NonEmptyVec {
-                    first: $item,
-                    rest: Vec::new(),
-                })
-            }
-            Some(string) => string.rest.push($item),
-        }
-    };
-}
 enum PonCommandKind {
-    Name(NonEmptyVec<PonWord>),
+    Name(Vec<PonWord>),
     Invocation(Vec<UndNode>),
 }
 struct PonCommand {
     idx: usize,
     kind: PonCommandKind,
 }
-type PonWord = NonEmptyString;
+type PonWord = String;
 fn und_to_pon(und: Vec<UndNode>) -> Vec<PonCommand> {
     let mut program = Vec::new();
     for und_node in und {
-        program.push(PonCommand {
-            idx: und_node.idx,
-            kind: match und_node.kind {
-                UndNodeKind::Group(nodes) => PonCommandKind::Invocation(nodes),
-                UndNodeKind::Text(text) => {
-                    let mut words = None;
-                    let mut wordbuf = None;
-                    let mut textidx = 0;
-                    let mut c = Some(text.first);
-                    loop {
-                        match c {
-
-                        }
-                        c = unsafe { text.rest.get_unchecked(textidx..) }.chars().next();
-                        if let Some(c) = c {
-                            textidx += c.len_utf8();
-                        }
-                    }
+        match und_node.kind {
+            UndNodeKind::Group(group) => program.push(PonCommand {
+                idx: und_node.idx,
+                kind: PonCommandKind::Invocation(group),
+            }),
+            UndNodeKind::Text(text) => {
+                if let Some((name_idx, _)) = text.char_indices().find(|(_, c)| !c.is_whitespace()) {
+                    program.push(PonCommand {
+                        idx: und_node.idx + name_idx,
+                        kind: PonCommandKind::Name(
+                            text.split_whitespace().map(|s| s.to_owned()).collect(),
+                        ),
+                    })
                 }
-            },
-        });
+            }
+        }
     }
     program
 }
