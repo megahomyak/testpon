@@ -1,6 +1,8 @@
+// https://soundcloud.com/geekedhub/meth-pipe
+
 enum UndNodeKind {
-    Text(String),
-    Group(Vec<UndNode>),
+    Plain(String),
+    Parenthesized(String),
 }
 struct UndNode {
     idx: usize,
@@ -9,105 +11,85 @@ struct UndNode {
 struct UndParsingResult {
     unexpected_closers: Vec<usize>,
     unclosed_openers: Vec<usize>,
-    root: Vec<UndNode>,
-    escape_at_end_of_input: bool,
-}
-macro_rules! und_get_top {
-    ($overlays: ident, $root: ident) => {
-        match $overlays.last_mut() {
-            None => &mut $root,
-            Some(top) => &mut top.group,
-        }
-    };
+    text: Vec<UndNode>,
 }
 fn parse_und(input: &str) -> UndParsingResult {
-    let mut root = Vec::new();
-    struct Overlay {
-        idx: usize,
-        group: Vec<UndNode>,
-    }
-    let mut overlays: Vec<Overlay> = vec![];
+    let mut text = Vec::new();
+    let mut unexpected_closers = Vec::new();
+    let mut unclosed_openers = Vec::new();
 
-    let mut unclosed_openers = vec![];
-    let mut unexpected_closers = vec![];
-
-    let mut idx = 0;
-    let mut curidx = idx;
+    let mut nextidx = 0;
+    let mut curidx = nextidx;
 
     let mut sbuf = String::new();
-    let mut sbufidx = idx;
+    let mut sbufidx = nextidx;
 
     let mut escaped = false;
 
     loop {
-        let c = unsafe { input.get_unchecked(idx..) }.chars().next();
+        let c = unsafe { input.get_unchecked(nextidx..) }.chars().next();
         if let Some(c) = c {
-            curidx = idx;
-            idx += c.len_utf8();
+            nextidx += c.len_utf8();
             if escaped {
                 escaped = false;
-                if !(c == '(' || c == ')' || c == '\\') {
-                    sbuf.push('\\');
-                }
                 sbuf.push(c);
                 continue;
+            } else {
+                curidx = nextidx;
             }
         }
-
         match c {
-            Some(')') | None | Some('(') => {
-                if sbuf != "" {
-                    let top = und_get_top!(overlays, root);
-                    top.push(UndNode {
+            None | Some('(') | Some(')') => {
+                if !sbuf.is_empty() {
+                    text.push(UndNode {
                         idx: sbufidx,
-                        kind: UndNodeKind::Text(sbuf),
+                        kind: if unclosed_openers.is_empty() {
+                            UndNodeKind::Plain(sbuf)
+                        } else {
+                            UndNodeKind::Parenthesized(sbuf)
+                        },
                     });
-                    sbufidx = idx;
                     sbuf = String::new();
+                    sbufidx = nextidx;
                 }
-                if c == Some(')') || c == None {
-                    match overlays.pop() {
-                        None => {
-                            if c == None {
-                                break;
-                            } else {
-                                unexpected_closers.push(curidx);
-                            }
-                        }
-                        Some(old_top) => {
-                            let new_top = und_get_top!(overlays, root);
-                            new_top.push(UndNode {
-                                idx: old_top.idx,
-                                kind: UndNodeKind::Group(old_top.group),
-                            });
-                            if c == None {
-                                unclosed_openers.push(old_top.idx);
+                if c == None {
+                    break;
+                }
+                if c == Some('(') {
+                    if !unclosed_openers.is_empty() {
+                        sbuf.push('(');
+                    }
+                    unclosed_openers.push(curidx);
+                } else {
+                    match unclosed_openers.pop() {
+                        None => unexpected_closers.push(curidx),
+                        Some(_) => {
+                            if !unclosed_openers.is_empty() {
+                                sbuf.push(')')
                             }
                         }
                     }
-                } else {
-                    overlays.push(Overlay {
-                        idx: curidx,
-                        group: Vec::new(),
-                    });
                 }
             }
-            Some('\\') => escaped = true,
-            Some(c) => sbuf.push(c),
+            Some(c) => {
+                if c == '\\' {
+                    escaped = true;
+                }
+                sbuf.push(c);
+            }
         }
     }
 
     UndParsingResult {
-        unclosed_openers,
+        text,
         unexpected_closers,
-        root,
-        escape_at_end_of_input: escaped,
+        unclosed_openers,
     }
 }
 
 enum PonCommandKind {
     Name(Vec<PonWord>),
-    Invocation(Vec<UndNode>),
+    Invocation(String),
 }
 struct PonCommand {
     idx: usize,
@@ -118,16 +100,18 @@ fn und_to_pon(und: Vec<UndNode>) -> Vec<PonCommand> {
     let mut program = Vec::new();
     for und_node in und {
         match und_node.kind {
-            UndNodeKind::Group(group) => program.push(PonCommand {
-                idx: und_node.idx,
-                kind: PonCommandKind::Invocation(group),
-            }),
-            UndNodeKind::Text(text) => {
-                if let Some((name_idx, _)) = text.char_indices().find(|(_, c)| !c.is_whitespace()) {
+            UndNodeKind::Parenthesized(input) => {
+                program.push(PonCommand {
+                    idx: und_node.idx,
+                    kind: PonCommandKind::Invocation(input),
+                });
+            }
+            UndNodeKind::Plain(plain) => {
+                if let Some((idx, _)) = plain.char_indices().find(|(_, c)| !c.is_whitespace()) {
                     program.push(PonCommand {
-                        idx: und_node.idx + name_idx,
+                        idx,
                         kind: PonCommandKind::Name(
-                            text.split_whitespace().map(|s| s.to_owned()).collect(),
+                            plain.split_whitespace().map(str::to_owned).collect(),
                         ),
                     })
                 }
