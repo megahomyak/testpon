@@ -133,14 +133,14 @@ fn und_to_pon(und: Vec<UndNode>) -> Vec<PonCommand> {
                     kind: PonCommandKind::Invocation(input),
                 });
             }
-            UndNodeKind::Text(plain) => {
+            UndNodeKind::Text(text) => {
                 let mut words = Vec::new();
                 let mut nextidx = 0;
                 let mut wordbuf = String::new();
                 let mut nameidx = nextidx;
                 let mut escaped = false;
                 loop {
-                    let c = unsafe { plain.get_unchecked(nextidx..) }.chars().next();
+                    let c = unsafe { text.get_unchecked(nextidx..) }.chars().next();
                     if let Some(c) = c {
                         nextidx += c.len_utf8();
                     }
