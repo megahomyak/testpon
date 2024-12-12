@@ -46,18 +46,17 @@ fn parse_und(input: &str) -> UndParsingResult {
     loop {
         let c = unsafe { input.get_unchecked(nextidx..) }.chars().next();
         if let Some(c) = c {
+            curidx = nextidx;
             nextidx += c.len_utf8();
             if escaped {
                 escaped = false;
                 textbuf.push(c);
                 continue;
-            } else {
-                curidx = nextidx;
             }
         }
 
         match c {
-            None | Some('(') | Some(')') => {
+            None | Some('(' | ')') => {
                 if !textbuf.is_empty() {
                     let top = und_get_top!(overlays, root);
                     top.push(UndNode {
@@ -139,25 +138,46 @@ fn und_to_pon(und: Vec<UndNode>) -> Vec<PonCommand> {
                 let mut nextidx = 0;
                 let mut wordbuf = String::new();
                 let mut wordidx = nextidx;
+                let mut escaped = false;
                 loop {
                     let c = unsafe { plain.get_unchecked(nextidx..) }.chars().next();
-                    let is_special = match c {
-                        None => true,
+                    let word_char = match c {
+                        None => None,
                         Some(c) => {
                             nextidx += c.len_utf8();
+                            if escaped {
+                                escaped = false;
+                                if !(c.is_whitespace() || c == '(' || c == ')' || c == '\\') {
+                                    wordbuf.push('\\');
+                                }
+                                wordbuf.push(c);
+                                continue;
+                            }
                             if c.is_whitespace() && words.is_empty() {
                                 wordidx = nextidx;
                             }
-                            c.is_whitespace()
+                            (!c.is_whitespace()).then(|| c)
                         }
                     };
-                    if is_special {
-                        if words.is_empty() {
-                            words.push(wordbuf);
-                            wordbuf = String::new();
+                    match word_char {
+                        Some(c) => {
+                            if c == '\\' {
+                                escaped = true;
+                            } else {
+                                wordbuf.push(c);
+                            }
                         }
-                        if c == None {
-                            break;
+                        None => {
+                            if c == None && escaped {
+                                wordbuf.push('\\');
+                            }
+                            if !wordbuf.is_empty() {
+                                words.push(wordbuf);
+                                wordbuf = String::new();
+                            }
+                            if c == None {
+                                break;
+                            }
                         }
                     }
                 }
@@ -165,7 +185,7 @@ fn und_to_pon(und: Vec<UndNode>) -> Vec<PonCommand> {
                     program.push(PonCommand {
                         idx: wordidx,
                         kind: PonCommandKind::Name(words),
-                    })
+                    });
                 }
             }
         }
