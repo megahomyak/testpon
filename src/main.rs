@@ -127,10 +127,10 @@ fn und_to_pon(und: Vec<UndNode>) -> Vec<PonCommand> {
     let mut program = Vec::new();
     for und_node in und {
         match und_node.kind {
-            UndNodeKind::Group(input) => {
+            UndNodeKind::Group(invocation) => {
                 program.push(PonCommand {
                     idx: und_node.idx,
-                    kind: PonCommandKind::Invocation(input),
+                    kind: PonCommandKind::Invocation(invocation),
                 });
             }
             UndNodeKind::Text(text) => {
@@ -197,7 +197,20 @@ fn und_to_pon(und: Vec<UndNode>) -> Vec<PonCommand> {
 fn main() {
     let contents = std::fs::read_to_string(std::env::args().nth(1).unwrap()).unwrap();
     let und_results = parse_und(&contents);
-    println!("Und results: {:#?}", und_results);
+    if !(und_results.unclosed_openers.is_empty() && und_results.unexpected_closers.is_empty()) {
+        if !und_results.unclosed_openers.is_empty() {
+            println!("Unclosed openers: {:?}", und_results.unclosed_openers);
+        }
+        if !und_results.unexpected_closers.is_empty() {
+            println!("Unexpected closers: {:?}", und_results.unexpected_closers);
+        }
+        std::process::exit(1);
+    }
     let pon = und_to_pon(und_results.root);
-    println!("Pon: {:#?}", pon);
+    for command in pon {
+        match command.kind {
+            PonCommandKind::Name(name) => todo!(),
+            PonCommandKind::Invocation(invocation) => todo!(),
+        }
+    }
 }
