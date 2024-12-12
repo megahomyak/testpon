@@ -1,20 +1,23 @@
 // https://soundcloud.com/geekedhub/meth-pipe
 
+#[derive(Debug)]
 enum UndNodeKind {
     Plain(String),
     Parenthesized(String),
 }
+#[derive(Debug)]
 struct UndNode {
     idx: usize,
     kind: UndNodeKind,
 }
+#[derive(Debug)]
 struct UndParsingResult {
     unexpected_closers: Vec<usize>,
     unclosed_openers: Vec<usize>,
-    text: Vec<UndNode>,
+    nodes: Vec<UndNode>,
 }
 fn parse_und(input: &str) -> UndParsingResult {
-    let mut text = Vec::new();
+    let mut nodes = Vec::new();
     let mut unexpected_closers = Vec::new();
     let mut unclosed_openers = Vec::new();
 
@@ -41,7 +44,7 @@ fn parse_und(input: &str) -> UndParsingResult {
         match c {
             None | Some('(') | Some(')') => {
                 if !sbuf.is_empty() {
-                    text.push(UndNode {
+                    nodes.push(UndNode {
                         idx: sbufidx,
                         kind: if unclosed_openers.is_empty() {
                             UndNodeKind::Plain(sbuf)
@@ -81,16 +84,18 @@ fn parse_und(input: &str) -> UndParsingResult {
     }
 
     UndParsingResult {
-        text,
+        nodes,
         unexpected_closers,
         unclosed_openers,
     }
 }
 
+#[derive(Debug)]
 enum PonCommandKind {
     Name(Vec<PonWord>),
     Invocation(String),
 }
+#[derive(Debug)]
 struct PonCommand {
     idx: usize,
     kind: PonCommandKind,
@@ -122,5 +127,9 @@ fn und_to_pon(und: Vec<UndNode>) -> Vec<PonCommand> {
 }
 
 fn main() {
-    println!("Hello, world!");
+    let contents = std::fs::read_to_string(std::env::args().nth(1).unwrap()).unwrap();
+    let und_results = parse_und(&contents);
+    println!("Und results: {:#?}", und_results);
+    let pon = und_to_pon(und_results.nodes);
+    println!("Pon: {:#?}", pon);
 }
