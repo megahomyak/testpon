@@ -63,9 +63,9 @@ fn parse_und(input: &str) -> UndParsingResult {
                         idx: textidx,
                         kind: UndNodeKind::Text(textbuf),
                     });
-                    textidx = nextidx;
                     textbuf = String::new();
                 }
+                textidx = nextidx;
                 if c == Some(')') || c == None {
                     match overlays.pop() {
                         None => {
@@ -137,53 +137,54 @@ fn und_to_pon(und: Vec<UndNode>) -> Vec<PonCommand> {
                 let mut words = Vec::new();
                 let mut nextidx = 0;
                 let mut wordbuf = String::new();
-                let mut wordidx = nextidx;
+                let mut nameidx = nextidx;
                 let mut escaped = false;
                 loop {
                     let c = unsafe { plain.get_unchecked(nextidx..) }.chars().next();
-                    let word_char = match c {
-                        None => None,
-                        Some(c) => {
-                            nextidx += c.len_utf8();
-                            if escaped {
-                                escaped = false;
-                                if !(c.is_whitespace() || c == '(' || c == ')' || c == '\\') {
-                                    wordbuf.push('\\');
-                                }
-                                wordbuf.push(c);
-                                continue;
-                            }
-                            if c.is_whitespace() && words.is_empty() {
-                                wordidx = nextidx;
-                            }
-                            (!c.is_whitespace()).then(|| c)
+                    if let Some(c) = c {
+                        nextidx += c.len_utf8();
+                    }
+                    if escaped {
+                        escaped = false;
+                        if c.is_some_and(|c| {
+                            !(c == ')' || c == '(' || c == '\\' || c.is_whitespace())
+                        }) {
+                            wordbuf.push('\\');
                         }
+                        if let Some(c) = c {
+                            wordbuf.push(c);
+                        }
+                        continue;
                     };
-                    match word_char {
+                    if match c {
+                        None => true,
                         Some(c) => {
-                            if c == '\\' {
-                                escaped = true;
-                            } else {
-                                wordbuf.push(c);
+                            if c.is_whitespace() && words.is_empty() {
+                                nameidx = nextidx;
                             }
+                            let is_boundary = c == ')' || c == '(' || c.is_whitespace();
+                            if !is_boundary {
+                                if c == '\\' {
+                                    escaped = true;
+                                } else {
+                                    wordbuf.push(c);
+                                }
+                            }
+                            is_boundary
                         }
-                        None => {
-                            if c == None && escaped {
-                                wordbuf.push('\\');
-                            }
-                            if !wordbuf.is_empty() {
-                                words.push(wordbuf);
-                                wordbuf = String::new();
-                            }
-                            if c == None {
-                                break;
-                            }
+                    } {
+                        if !wordbuf.is_empty() {
+                            words.push(wordbuf);
+                            wordbuf = String::new();
+                        }
+                        if c == None {
+                            break;
                         }
                     }
                 }
                 if !words.is_empty() {
                     program.push(PonCommand {
-                        idx: wordidx,
+                        idx: nameidx + und_node.idx,
                         kind: PonCommandKind::Name(words),
                     });
                 }
