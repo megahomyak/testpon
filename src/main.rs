@@ -2,8 +2,8 @@
 
 #[derive(Debug)]
 enum UndNodeKind {
-    Plain(String),
-    Parenthesized(String),
+    Text(String),
+    Group(Vec<UndNode>),
 }
 #[derive(Debug)]
 struct UndNode {
@@ -14,18 +14,32 @@ struct UndNode {
 struct UndParsingResult {
     unexpected_closers: Vec<usize>,
     unclosed_openers: Vec<usize>,
-    nodes: Vec<UndNode>,
+    root: Vec<UndNode>,
+}
+macro_rules! und_get_top {
+    ($overlays:ident, $root:ident) => {
+        match $overlays.last_mut() {
+            None => &mut $root,
+            Some(top) => &mut top.group,
+        }
+    };
 }
 fn parse_und(input: &str) -> UndParsingResult {
-    let mut nodes = Vec::new();
-    let mut unexpected_closers = Vec::new();
-    let mut unclosed_openers = Vec::new();
+    let mut root = Vec::new();
+    struct Overlay {
+        idx: usize,
+        group: Vec<UndNode>,
+    }
+    let mut overlays: Vec<Overlay> = vec![];
+
+    let mut unclosed_openers = vec![];
+    let mut unexpected_closers = vec![];
 
     let mut nextidx = 0;
     let mut curidx = nextidx;
 
-    let mut sbuf = String::new();
-    let mut sbufidx = nextidx;
+    let mut textbuf = String::new();
+    let mut textidx = nextidx;
 
     let mut escaped = false;
 
@@ -35,65 +49,74 @@ fn parse_und(input: &str) -> UndParsingResult {
             nextidx += c.len_utf8();
             if escaped {
                 escaped = false;
-                sbuf.push(c);
+                textbuf.push(c);
                 continue;
             } else {
                 curidx = nextidx;
             }
         }
+
         match c {
             None | Some('(') | Some(')') => {
-                if !sbuf.is_empty() {
-                    nodes.push(UndNode {
-                        idx: sbufidx,
-                        kind: if unclosed_openers.is_empty() {
-                            UndNodeKind::Plain(sbuf)
-                        } else {
-                            UndNodeKind::Parenthesized(sbuf)
-                        },
+                if !textbuf.is_empty() {
+                    let top = und_get_top!(overlays, root);
+                    top.push(UndNode {
+                        idx: textidx,
+                        kind: UndNodeKind::Text(textbuf),
                     });
-                    sbuf = String::new();
-                    sbufidx = nextidx;
+                    textidx = nextidx;
+                    textbuf = String::new();
                 }
-                if c == None {
-                    break;
-                }
-                if c == Some('(') {
-                    if !unclosed_openers.is_empty() {
-                        sbuf.push('(');
-                    }
-                    unclosed_openers.push(curidx);
-                } else {
-                    match unclosed_openers.pop() {
-                        None => unexpected_closers.push(curidx),
-                        Some(_) => {
-                            if !unclosed_openers.is_empty() {
-                                sbuf.push(')')
+                if c == Some(')') || c == None {
+                    match overlays.pop() {
+                        None => {
+                            if c == None {
+                                break;
+                            } else {
+                                unexpected_closers.push(curidx);
+                            }
+                        }
+                        Some(old_top) => {
+                            let new_top = match overlays.last_mut() {
+                                None => &mut root,
+                                Some(new_top) => &mut new_top.group,
+                            };
+                            new_top.push(UndNode {
+                                idx: old_top.idx,
+                                kind: UndNodeKind::Group(old_top.group),
+                            });
+                            if c == None {
+                                unclosed_openers.push(old_top.idx);
                             }
                         }
                     }
+                } else {
+                    overlays.push(Overlay {
+                        idx: curidx,
+                        group: Vec::new(),
+                    });
                 }
             }
             Some(c) => {
                 if c == '\\' {
                     escaped = true;
                 }
-                sbuf.push(c);
+                textbuf.push(c);
             }
         }
     }
 
     UndParsingResult {
-        nodes,
-        unexpected_closers,
         unclosed_openers,
+        unexpected_closers,
+        root,
     }
 }
 
 #[derive(Debug)]
 enum PonCommandKind {
     Name(Vec<PonWord>),
-    Invocation(String),
+    Invocation(Vec<UndNode>),
 }
 #[derive(Debug)]
 struct PonCommand {
@@ -105,19 +128,43 @@ fn und_to_pon(und: Vec<UndNode>) -> Vec<PonCommand> {
     let mut program = Vec::new();
     for und_node in und {
         match und_node.kind {
-            UndNodeKind::Parenthesized(input) => {
+            UndNodeKind::Group(input) => {
                 program.push(PonCommand {
                     idx: und_node.idx,
                     kind: PonCommandKind::Invocation(input),
                 });
             }
-            UndNodeKind::Plain(plain) => {
-                if let Some((idx, _)) = plain.char_indices().find(|(_, c)| !c.is_whitespace()) {
+            UndNodeKind::Text(plain) => {
+                let mut words = Vec::new();
+                let mut nextidx = 0;
+                let mut wordbuf = String::new();
+                let mut wordidx = nextidx;
+                loop {
+                    let c = unsafe { plain.get_unchecked(nextidx..) }.chars().next();
+                    let is_special = match c {
+                        None => true,
+                        Some(c) => {
+                            nextidx += c.len_utf8();
+                            if c.is_whitespace() && words.is_empty() {
+                                wordidx = nextidx;
+                            }
+                            c.is_whitespace()
+                        }
+                    };
+                    if is_special {
+                        if words.is_empty() {
+                            words.push(wordbuf);
+                            wordbuf = String::new();
+                        }
+                        if c == None {
+                            break;
+                        }
+                    }
+                }
+                if !words.is_empty() {
                     program.push(PonCommand {
-                        idx,
-                        kind: PonCommandKind::Name(
-                            plain.split_whitespace().map(str::to_owned).collect(),
-                        ),
+                        idx: wordidx,
+                        kind: PonCommandKind::Name(words),
                     })
                 }
             }
@@ -130,6 +177,6 @@ fn main() {
     let contents = std::fs::read_to_string(std::env::args().nth(1).unwrap()).unwrap();
     let und_results = parse_und(&contents);
     println!("Und results: {:#?}", und_results);
-    let pon = und_to_pon(und_results.nodes);
+    let pon = und_to_pon(und_results.root);
     println!("Pon: {:#?}", pon);
 }
