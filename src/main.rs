@@ -48,11 +48,16 @@ fn parse_und(input: &str) -> UndParsingResult {
         if let Some(c) = c {
             curidx = nextidx;
             nextidx += c.len_utf8();
-            if escaped {
-                escaped = false;
-                textbuf.push(c);
-                continue;
+        }
+        if escaped {
+            escaped = false;
+            if !matches!(c, Some('(' | ')')) {
+                textbuf.push('\\');
             }
+            if let Some(c) = c {
+                textbuf.push(c);
+            }
+            continue;
         }
 
         match c {
@@ -76,10 +81,7 @@ fn parse_und(input: &str) -> UndParsingResult {
                             }
                         }
                         Some(old_top) => {
-                            let new_top = match overlays.last_mut() {
-                                None => &mut root,
-                                Some(new_top) => &mut new_top.group,
-                            };
+                            let new_top = und_get_top!(overlays, root);
                             new_top.push(UndNode {
                                 idx: old_top.idx,
                                 kind: UndNodeKind::Group(old_top.group),
@@ -96,12 +98,8 @@ fn parse_und(input: &str) -> UndParsingResult {
                     });
                 }
             }
-            Some(c) => {
-                if c == '\\' {
-                    escaped = true;
-                }
-                textbuf.push(c);
-            }
+            Some('\\') => escaped = true,
+            Some(c) => textbuf.push(c),
         }
     }
 
@@ -146,9 +144,10 @@ fn und_to_pon(und: Vec<UndNode>) -> Vec<PonCommand> {
                     }
                     if escaped {
                         escaped = false;
-                        if c.is_some_and(|c| {
-                            !(c == ')' || c == '(' || c == '\\' || c.is_whitespace())
-                        }) {
+                        if match c {
+                            None => true,
+                            Some(c) => !(c == '\\' || c.is_whitespace()),
+                        } {
                             wordbuf.push('\\');
                         }
                         if let Some(c) = c {
@@ -196,7 +195,11 @@ fn und_to_pon(und: Vec<UndNode>) -> Vec<PonCommand> {
 
 fn main() {
     let contents = std::fs::read_to_string(std::env::args().nth(1).unwrap()).unwrap();
+    println!("Contents: {:#?}", contents);
     let und_results = parse_und(&contents);
+    println!("Und: {:#?}", und_results);
+    let pon = und_to_pon(und_results.root);
+    println!("Pon: {:#?}", pon);
     if !(und_results.unclosed_openers.is_empty() && und_results.unexpected_closers.is_empty()) {
         if !und_results.unclosed_openers.is_empty() {
             println!("Unclosed openers: {:?}", und_results.unclosed_openers);
@@ -206,7 +209,6 @@ fn main() {
         }
         std::process::exit(1);
     }
-    let pon = und_to_pon(und_results.root);
     for command in pon {
         match command.kind {
             PonCommandKind::Name(name) => todo!(),
